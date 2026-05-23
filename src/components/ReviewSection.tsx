@@ -1,6 +1,6 @@
 // components/ReviewSection.tsx
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Star, Calendar, Loader2, MessageCircle, ExternalLink } from 'lucide-react';
+import { Plus, Edit2, Trash2, Star, Calendar, Loader2, MessageCircle, ExternalLink, AlertCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 interface Review {
@@ -18,6 +18,16 @@ interface Review {
   websiteUrl?: string;
 }
 
+// Field character limits (matching backend)
+const FIELD_LIMITS = {
+  name: 100,
+  position: 100,
+  company: 100,
+  text: 1000,
+  projectType: 50,
+  websiteUrl: 500
+};
+
 const API_URL = import.meta.env.VITE_API_URL;
 const API_KEY = import.meta.env.VITE_ADMIN_API_KEY;
 
@@ -27,6 +37,7 @@ const ReviewSection = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState({
     name: '',
@@ -44,7 +55,7 @@ const ReviewSection = () => {
   const apiRequest = async (endpoint: string, method: string = 'GET', body?: any) => {
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': API_KEY
+      'x-api-key': API_KEY || ''
     };
 
     try {
@@ -56,9 +67,19 @@ const ReviewSection = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
+        // Handle validation errors from backend
+        if (errorData.errors) {
+          const backendErrors: Record<string, string> = {};
+          Object.keys(errorData.errors).forEach(key => {
+            backendErrors[key] = errorData.errors[key].message || `${key} is invalid`;
+          });
+          setValidationErrors(backendErrors);
+          throw new Error(errorData.message || 'Validation error');
+        }
         throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
 
+      setValidationErrors({});
       return await response.json();
     } catch (error) {
       console.error('API Error:', error);
@@ -84,15 +105,37 @@ const ReviewSection = () => {
     fetchReviews();
   }, []);
 
+  const validateField = (name: string, value: string): string => {
+    const limit = FIELD_LIMITS[name as keyof typeof FIELD_LIMITS];
+    if (limit && value.length > limit) {
+      return `${name} must be ${limit} characters or less (currently ${value.length}/${limit})`;
+    }
+    return '';
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
+
+    // Clear validation error for this field
+    setValidationErrors(prev => ({ ...prev, [name]: '' }));
 
     if (type === 'checkbox') {
       const checked = (e.target as HTMLInputElement).checked;
       setFormData(prev => ({ ...prev, [name]: checked }));
     } else if (name === 'rating') {
-      setFormData(prev => ({ ...prev, [name]: parseInt(value) }));
+      const rating = parseInt(value);
+      if (rating >= 1 && rating <= 5) {
+        setFormData(prev => ({ ...prev, [name]: rating }));
+      }
     } else {
+      // Check character limit
+      const limit = FIELD_LIMITS[name as keyof typeof FIELD_LIMITS];
+      if (limit && value.length > limit) {
+        setValidationErrors(prev => ({
+          ...prev,
+          [name]: `${name} exceeds ${limit} character limit (${value.length}/${limit})`
+        }));
+      }
       setFormData(prev => ({ ...prev, [name]: value }));
     }
   };
@@ -110,21 +153,39 @@ const ReviewSection = () => {
       order: 0,
       websiteUrl: ''
     });
+    setValidationErrors({});
     setIsEditing(false);
     setEditingId(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setValidationErrors({});
 
-    // Validation
-    if (!formData.name || !formData.position || !formData.text || !formData.projectType) {
-      toast.error('Please fill in all required fields');
-      return;
+    // Frontend validation
+    const errors: Record<string, string> = {};
+
+    if (!formData.name.trim()) errors.name = 'Name is required';
+    else if (formData.name.length > FIELD_LIMITS.name) errors.name = `Name must be ${FIELD_LIMITS.name} characters or less`;
+
+    if (!formData.position.trim()) errors.position = 'Position is required';
+    else if (formData.position.length > FIELD_LIMITS.position) errors.position = `Position must be ${FIELD_LIMITS.position} characters or less`;
+
+    if (!formData.text.trim()) errors.text = 'Review text is required';
+    else if (formData.text.length > FIELD_LIMITS.text) errors.text = `Review text must be ${FIELD_LIMITS.text} characters or less`;
+
+    if (!formData.projectType.trim()) errors.projectType = 'Project type is required';
+    else if (formData.projectType.length > FIELD_LIMITS.projectType) errors.projectType = `Project type must be ${FIELD_LIMITS.projectType} characters or less`;
+
+    if (formData.rating < 1 || formData.rating > 5) errors.rating = 'Rating must be between 1 and 5';
+
+    if (formData.websiteUrl && formData.websiteUrl.length > FIELD_LIMITS.websiteUrl) {
+      errors.websiteUrl = `Website URL must be ${FIELD_LIMITS.websiteUrl} characters or less`;
     }
 
-    if (formData.rating < 1 || formData.rating > 5) {
-      toast.error('Rating must be between 1 and 5');
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      toast.error('Please fix the validation errors');
       return;
     }
 
@@ -136,14 +197,12 @@ const ReviewSection = () => {
       const finalData = websiteUrl ? { ...submitData, websiteUrl } : submitData;
 
       if (isEditing && editingId) {
-        // Update existing review
         const updatedReview = await apiRequest(`/api/reviews/${editingId}`, 'PUT', finalData);
         setReviews(prev => prev.map(review =>
           review._id === editingId ? updatedReview : review
         ));
         toast.success('Review updated successfully!');
       } else {
-        // Add new review
         const newReview = await apiRequest('/api/reviews', 'POST', finalData);
         setReviews(prev => [...prev, newReview]);
         toast.success('Review added successfully!');
@@ -152,6 +211,7 @@ const ReviewSection = () => {
       resetForm();
     } catch (error) {
       console.error('Save error:', error);
+      // Error already shown by apiRequest
     } finally {
       setIsSaving(false);
     }
@@ -170,6 +230,7 @@ const ReviewSection = () => {
       order: review.order,
       websiteUrl: review.websiteUrl || ''
     });
+    setValidationErrors({});
     setIsEditing(true);
     setEditingId(review._id);
   };
@@ -226,10 +287,7 @@ const ReviewSection = () => {
           <Star
             key={i}
             size={16}
-            className={`${i < rating
-              ? 'text-yellow-400 fill-yellow-400'
-              : 'text-gray-300'
-              }`}
+            className={i < rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}
           />
         ))}
       </div>
@@ -248,10 +306,7 @@ const ReviewSection = () => {
           >
             <Star
               size={24}
-              className={`${i < value
-                ? 'text-yellow-400 fill-yellow-400'
-                : 'text-gray-300'
-                } hover:text-yellow-500 hover:fill-yellow-500 transition-colors`}
+              className={i < value ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300 hover:text-yellow-400 hover:fill-yellow-400 transition-colors'}
             />
           </button>
         ))}
@@ -265,6 +320,16 @@ const ReviewSection = () => {
       month: 'short',
       day: 'numeric'
     });
+  };
+
+  const CharacterCounter = ({ text, limit }: { text: string; limit: number }) => {
+    const length = text.length;
+    const isOver = length > limit;
+    return (
+      <span className={`text-xs ml-2 ${isOver ? 'text-red-500' : 'text-gray-400'}`}>
+        {length}/{limit}
+      </span>
+    );
   };
 
   return (
@@ -289,28 +354,48 @@ const ReviewSection = () => {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Client Name *
                 </label>
-                <input
-                  type="text"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  placeholder="John Doe"
-                />
+                <div className="flex items-center">
+                  <input
+                    type="text"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    maxLength={FIELD_LIMITS.name}
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${validationErrors.name ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
+                      }`}
+                    placeholder="John Doe"
+                  />
+                  <CharacterCounter text={formData.name} limit={FIELD_LIMITS.name} />
+                </div>
+                {validationErrors.name && (
+                  <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                    <AlertCircle size={12} /> {validationErrors.name}
+                  </p>
+                )}
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Position *
                 </label>
-                <input
-                  type="text"
-                  name="position"
-                  value={formData.position}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  placeholder="CTO, Project Manager, etc."
-                />
+                <div className="flex items-center">
+                  <input
+                    type="text"
+                    name="position"
+                    value={formData.position}
+                    onChange={handleInputChange}
+                    maxLength={FIELD_LIMITS.position}
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${validationErrors.position ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
+                      }`}
+                    placeholder="CTO, Project Manager, etc."
+                  />
+                  <CharacterCounter text={formData.position} limit={FIELD_LIMITS.position} />
+                </div>
+                {validationErrors.position && (
+                  <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                    <AlertCircle size={12} /> {validationErrors.position}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -318,28 +403,43 @@ const ReviewSection = () => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Company (Optional)
               </label>
-              <input
-                type="text"
-                name="company"
-                value={formData.company}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                placeholder="Company name (optional)"
-              />
+              <div className="flex items-center">
+                <input
+                  type="text"
+                  name="company"
+                  value={formData.company}
+                  onChange={handleInputChange}
+                  maxLength={FIELD_LIMITS.company}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  placeholder="Company name (optional)"
+                />
+                <CharacterCounter text={formData.company} limit={FIELD_LIMITS.company} />
+              </div>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Project Type *
               </label>
-              <input
-                type="text"
-                name="projectType"
-                value={formData.projectType}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                placeholder="Web Application, E-commerce, etc."
-              />
+              <div className="flex items-center">
+                <input
+                  type="text"
+                  name="projectType"
+                  value={formData.projectType}
+                  onChange={handleInputChange}
+                  maxLength={FIELD_LIMITS.projectType}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${validationErrors.projectType ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
+                    }`}
+                  placeholder="Web Application, E-commerce, etc. (max 50 chars)"
+                />
+                <CharacterCounter text={formData.projectType} limit={FIELD_LIMITS.projectType} />
+              </div>
+              {validationErrors.projectType && (
+                <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                  <AlertCircle size={12} /> {validationErrors.projectType}
+                </p>
+              )}
+
             </div>
 
             <div>
@@ -350,34 +450,61 @@ const ReviewSection = () => {
                 value={formData.rating}
                 onChange={(rating) => setFormData(prev => ({ ...prev, rating }))}
               />
+              {validationErrors.rating && (
+                <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                  <AlertCircle size={12} /> {validationErrors.rating}
+                </p>
+              )}
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Review Text *
               </label>
-              <textarea
-                name="text"
-                value={formData.text}
-                onChange={handleInputChange}
-                rows={4}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                placeholder="Client's testimonial about your work..."
-              />
+              <div className="relative">
+                <textarea
+                  name="text"
+                  value={formData.text}
+                  onChange={handleInputChange}
+                  rows={4}
+                  maxLength={FIELD_LIMITS.text}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${validationErrors.text ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
+                    }`}
+                  placeholder="Client's testimonial about your work..."
+                />
+                <div className="absolute bottom-2 right-2">
+                  <CharacterCounter text={formData.text} limit={FIELD_LIMITS.text} />
+                </div>
+              </div>
+              {validationErrors.text && (
+                <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                  <AlertCircle size={12} /> {validationErrors.text}
+                </p>
+              )}
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Website URL (Optional)
               </label>
-              <input
-                type="url"
-                name="websiteUrl"
-                value={formData.websiteUrl}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                placeholder="https://example.com"
-              />
+              <div className="flex items-center">
+                <input
+                  type="url"
+                  name="websiteUrl"
+                  value={formData.websiteUrl}
+                  onChange={handleInputChange}
+                  maxLength={FIELD_LIMITS.websiteUrl}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${validationErrors.websiteUrl ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
+                    }`}
+                  placeholder="https://example.com"
+                />
+                <CharacterCounter text={formData.websiteUrl} limit={FIELD_LIMITS.websiteUrl} />
+              </div>
+              {validationErrors.websiteUrl && (
+                <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                  <AlertCircle size={12} /> {validationErrors.websiteUrl}
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -391,7 +518,7 @@ const ReviewSection = () => {
                   value={formData.order}
                   onChange={handleInputChange}
                   min="0"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
             </div>
@@ -483,7 +610,7 @@ const ReviewSection = () => {
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
-                      <div className="flex items-center space-x-2 mb-1">
+                      <div className="flex items-center space-x-2 mb-1 flex-wrap gap-1">
                         <h4 className="font-semibold text-gray-900 dark:text-white">{review.name}</h4>
                         {review.featured && (
                           <span className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 rounded-full">
@@ -505,10 +632,7 @@ const ReviewSection = () => {
                       <button
                         onClick={() => toggleActive(review._id)}
                         disabled={isSaving}
-                        className={`p-1 rounded ${review.isActive
-                          ? 'text-green-500 hover:text-green-700'
-                          : 'text-gray-500 hover:text-gray-700'
-                          } disabled:text-gray-400`}
+                        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
                         aria-label={review.isActive ? 'Deactivate' : 'Activate'}
                       >
                         <div className={`w-3 h-3 rounded-full ${review.isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
@@ -516,18 +640,15 @@ const ReviewSection = () => {
                       <button
                         onClick={() => toggleFeatured(review._id)}
                         disabled={isSaving}
-                        className={`p-1 rounded ${review.featured
-                          ? 'text-yellow-500 hover:text-yellow-700'
-                          : 'text-gray-500 hover:text-yellow-500'
-                          } disabled:text-gray-400`}
+                        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
                         aria-label={review.featured ? 'Unfeature' : 'Feature'}
                       >
-                        <Star size={16} className={review.featured ? 'fill-yellow-500' : ''} />
+                        <Star size={16} className={review.featured ? 'text-yellow-500 fill-yellow-500' : 'text-gray-400'} />
                       </button>
                       <button
                         onClick={() => handleEdit(review)}
                         disabled={isSaving}
-                        className="text-blue-500 hover:text-blue-700 disabled:text-gray-400"
+                        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-blue-500"
                         aria-label="Edit"
                       >
                         <Edit2 size={16} />
@@ -535,7 +656,7 @@ const ReviewSection = () => {
                       <button
                         onClick={() => handleDelete(review._id)}
                         disabled={isSaving}
-                        className="text-red-500 hover:text-red-700 disabled:text-gray-400"
+                        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-red-500"
                         aria-label="Delete"
                       >
                         <Trash2 size={16} />
@@ -556,7 +677,7 @@ const ReviewSection = () => {
                     </span>
                   </div>
 
-                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-3 line-clamp-3">
                     "{review.text}"
                   </p>
 
