@@ -27,8 +27,8 @@ const ReviewSection = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  
-  const [formData, setFormData] = useState<Omit<Review, '_id' | 'createdAt'>>({
+
+  const [formData, setFormData] = useState({
     name: '',
     position: '',
     company: '',
@@ -37,7 +37,8 @@ const ReviewSection = () => {
     projectType: '',
     isActive: true,
     featured: false,
-    order: 0
+    order: 0,
+    websiteUrl: ''
   });
 
   const apiRequest = async (endpoint: string, method: string = 'GET', body?: any) => {
@@ -85,7 +86,7 @@ const ReviewSection = () => {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
-    
+
     if (type === 'checkbox') {
       const checked = (e.target as HTMLInputElement).checked;
       setFormData(prev => ({ ...prev, [name]: checked }));
@@ -106,7 +107,8 @@ const ReviewSection = () => {
       projectType: '',
       isActive: true,
       featured: false,
-      order: 0
+      order: 0,
+      websiteUrl: ''
     });
     setIsEditing(false);
     setEditingId(null);
@@ -114,8 +116,8 @@ const ReviewSection = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Updated validation - company is now optional
+
+    // Validation
     if (!formData.name || !formData.position || !formData.text || !formData.projectType) {
       toast.error('Please fill in all required fields');
       return;
@@ -128,21 +130,25 @@ const ReviewSection = () => {
 
     try {
       setIsSaving(true);
-      
+
+      // Prepare data for submission - conditionally include websiteUrl
+      const { websiteUrl, ...submitData } = formData;
+      const finalData = websiteUrl ? { ...submitData, websiteUrl } : submitData;
+
       if (isEditing && editingId) {
         // Update existing review
-        const updatedReview = await apiRequest(`/api/reviews/${editingId}`, 'PUT', formData);
-        setReviews(prev => prev.map(review => 
+        const updatedReview = await apiRequest(`/api/reviews/${editingId}`, 'PUT', finalData);
+        setReviews(prev => prev.map(review =>
           review._id === editingId ? updatedReview : review
         ));
         toast.success('Review updated successfully!');
       } else {
         // Add new review
-        const newReview = await apiRequest('/api/reviews', 'POST', formData);
+        const newReview = await apiRequest('/api/reviews', 'POST', finalData);
         setReviews(prev => [...prev, newReview]);
         toast.success('Review added successfully!');
       }
-      
+
       resetForm();
     } catch (error) {
       console.error('Save error:', error);
@@ -161,7 +167,8 @@ const ReviewSection = () => {
       projectType: review.projectType,
       isActive: review.isActive,
       featured: review.featured,
-      order: review.order
+      order: review.order,
+      websiteUrl: review.websiteUrl || ''
     });
     setIsEditing(true);
     setEditingId(review._id);
@@ -182,11 +189,11 @@ const ReviewSection = () => {
     }
   };
 
-  const toggleActive = async (id: string, currentStatus: boolean) => {
+  const toggleActive = async (id: string) => {
     try {
       setIsSaving(true);
       const result = await apiRequest(`/api/reviews/${id}/toggle-active`, 'PATCH');
-      setReviews(prev => prev.map(review => 
+      setReviews(prev => prev.map(review =>
         review._id === id ? { ...review, isActive: result.isActive } : review
       ));
       toast.success(`Review ${result.isActive ? 'activated' : 'deactivated'}!`);
@@ -197,11 +204,11 @@ const ReviewSection = () => {
     }
   };
 
-  const toggleFeatured = async (id: string, currentStatus: boolean) => {
+  const toggleFeatured = async (id: string) => {
     try {
       setIsSaving(true);
       const result = await apiRequest(`/api/reviews/${id}/toggle-featured`, 'PATCH');
-      setReviews(prev => prev.map(review => 
+      setReviews(prev => prev.map(review =>
         review._id === id ? { ...review, featured: result.featured } : review
       ));
       toast.success(`Review ${result.featured ? 'featured' : 'unfeatured'}!`);
@@ -219,11 +226,10 @@ const ReviewSection = () => {
           <Star
             key={i}
             size={16}
-            className={`${
-              i < rating 
-                ? 'text-yellow-400 fill-yellow-400' 
-                : 'text-gray-300'
-            }`}
+            className={`${i < rating
+              ? 'text-yellow-400 fill-yellow-400'
+              : 'text-gray-300'
+              }`}
           />
         ))}
       </div>
@@ -242,11 +248,10 @@ const ReviewSection = () => {
           >
             <Star
               size={24}
-              className={`${
-                i < value 
-                  ? 'text-yellow-400 fill-yellow-400' 
-                  : 'text-gray-300'
-              } hover:text-yellow-500 hover:fill-yellow-500 transition-colors`}
+              className={`${i < value
+                ? 'text-yellow-400 fill-yellow-400'
+                : 'text-gray-300'
+                } hover:text-yellow-500 hover:fill-yellow-500 transition-colors`}
             />
           </button>
         ))}
@@ -277,7 +282,7 @@ const ReviewSection = () => {
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             {isEditing ? 'Edit Review' : 'Add New Review'}
           </h3>
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -291,7 +296,6 @@ const ReviewSection = () => {
                   onChange={handleInputChange}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   placeholder="John Doe"
-                  required
                 />
               </div>
 
@@ -306,7 +310,6 @@ const ReviewSection = () => {
                   onChange={handleInputChange}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   placeholder="CTO, Project Manager, etc."
-                  required
                 />
               </div>
             </div>
@@ -336,7 +339,6 @@ const ReviewSection = () => {
                 onChange={handleInputChange}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 placeholder="Web Application, E-commerce, etc."
-                required
               />
             </div>
 
@@ -344,15 +346,9 @@ const ReviewSection = () => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Rating *
               </label>
-              <StarRatingInput 
-                value={formData.rating} 
-                onChange={(rating) => setFormData(prev => ({ ...prev, rating }))} 
-              />
-              <input
-                type="hidden"
-                name="rating"
+              <StarRatingInput
                 value={formData.rating}
-                required
+                onChange={(rating) => setFormData(prev => ({ ...prev, rating }))}
               />
             </div>
 
@@ -367,7 +363,6 @@ const ReviewSection = () => {
                 rows={4}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 placeholder="Client's testimonial about your work..."
-                required
               />
             </div>
 
@@ -378,7 +373,7 @@ const ReviewSection = () => {
               <input
                 type="url"
                 name="websiteUrl"
-                value={formData.websiteUrl || ''}
+                value={formData.websiteUrl}
                 onChange={handleInputChange}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 placeholder="https://example.com"
@@ -429,7 +424,7 @@ const ReviewSection = () => {
               <button
                 type="submit"
                 disabled={isSaving}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 dark:disabled:bg-blue-800 transition-colors"
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
               >
                 {isSaving ? (
                   <Loader2 className="animate-spin" size={16} />
@@ -440,7 +435,7 @@ const ReviewSection = () => {
                 )}
                 <span>{isEditing ? 'Update' : 'Add'} Review</span>
               </button>
-              
+
               {isEditing && (
                 <button
                   type="button"
@@ -479,13 +474,12 @@ const ReviewSection = () => {
           ) : (
             <div className="space-y-4 max-h-[calc(100vh-300px)] overflow-y-auto pr-2">
               {reviews.map(review => (
-                <div 
-                  key={review._id} 
-                  className={`p-4 rounded-lg border ${
-                    review.isActive 
-                      ? 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600' 
-                      : 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 opacity-70'
-                  }`}
+                <div
+                  key={review._id}
+                  className={`p-4 rounded-lg border ${review.isActive
+                    ? 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'
+                    : 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 opacity-70'
+                    }`}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
@@ -509,25 +503,23 @@ const ReviewSection = () => {
                     </div>
                     <div className="flex items-center space-x-2 ml-4">
                       <button
-                        onClick={() => toggleActive(review._id, review.isActive)}
+                        onClick={() => toggleActive(review._id)}
                         disabled={isSaving}
-                        className={`p-1 rounded ${
-                          review.isActive 
-                            ? 'text-green-500 hover:text-green-700 dark:hover:text-green-400' 
-                            : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-400'
-                        } disabled:text-gray-400 dark:disabled:text-gray-500`}
+                        className={`p-1 rounded ${review.isActive
+                          ? 'text-green-500 hover:text-green-700'
+                          : 'text-gray-500 hover:text-gray-700'
+                          } disabled:text-gray-400`}
                         aria-label={review.isActive ? 'Deactivate' : 'Activate'}
                       >
                         <div className={`w-3 h-3 rounded-full ${review.isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
                       </button>
                       <button
-                        onClick={() => toggleFeatured(review._id, review.featured)}
+                        onClick={() => toggleFeatured(review._id)}
                         disabled={isSaving}
-                        className={`p-1 rounded ${
-                          review.featured 
-                            ? 'text-yellow-500 hover:text-yellow-700 dark:hover:text-yellow-400' 
-                            : 'text-gray-500 hover:text-yellow-500 dark:hover:text-yellow-400'
-                        } disabled:text-gray-400 dark:disabled:text-gray-500`}
+                        className={`p-1 rounded ${review.featured
+                          ? 'text-yellow-500 hover:text-yellow-700'
+                          : 'text-gray-500 hover:text-yellow-500'
+                          } disabled:text-gray-400`}
                         aria-label={review.featured ? 'Unfeature' : 'Feature'}
                       >
                         <Star size={16} className={review.featured ? 'fill-yellow-500' : ''} />
@@ -535,7 +527,7 @@ const ReviewSection = () => {
                       <button
                         onClick={() => handleEdit(review)}
                         disabled={isSaving}
-                        className="text-blue-500 hover:text-blue-700 dark:hover:text-blue-400 disabled:text-gray-400 dark:disabled:text-gray-500"
+                        className="text-blue-500 hover:text-blue-700 disabled:text-gray-400"
                         aria-label="Edit"
                       >
                         <Edit2 size={16} />
@@ -543,18 +535,18 @@ const ReviewSection = () => {
                       <button
                         onClick={() => handleDelete(review._id)}
                         disabled={isSaving}
-                        className="text-red-500 hover:text-red-700 dark:hover:text-red-400 disabled:text-gray-400 dark:disabled:text-gray-500"
+                        className="text-red-500 hover:text-red-700 disabled:text-gray-400"
                         aria-label="Delete"
                       >
                         <Trash2 size={16} />
                       </button>
                     </div>
                   </div>
-                  
+
                   <div className="mb-3">
                     <StarRatingDisplay rating={review.rating} />
                   </div>
-                  
+
                   <div className="mb-2">
                     <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded-full">
                       {review.projectType}
@@ -563,13 +555,13 @@ const ReviewSection = () => {
                       Order: {review.order}
                     </span>
                   </div>
-                  
-                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-3 line-clamp-3">
+
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
                     "{review.text}"
                   </p>
 
                   {review.websiteUrl && (
-                    <a 
+                    <a
                       href={review.websiteUrl}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -578,8 +570,8 @@ const ReviewSection = () => {
                       View Website <ExternalLink className="ml-1" size={12} />
                     </a>
                   )}
-                  
-                  <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-400">
+
+                  <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-400 mt-2">
                     <Calendar size={12} />
                     <span>Added {formatDate(review.createdAt)}</span>
                   </div>
