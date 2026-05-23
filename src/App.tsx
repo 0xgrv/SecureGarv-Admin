@@ -10,7 +10,8 @@ import EducationSection from './components/EducationSection';
 import ProjectsSection from './components/ProjectsSection';
 import MessagesSection from './components/MessagesSection';
 import BlogSection from './components/BlogSection';
-import ReviewSection from './components/ReviewSection'; // Add this import
+import ReviewSection from './components/ReviewSection';
+import CommunitySection from './components/CommunitySection';
 
 function App() {
   const { isLoaded, isSignedIn } = useAuth();
@@ -44,20 +45,27 @@ function App() {
         return <MessagesSection />;
       case 'blog':
         return <BlogSection />;
-      case 'reviews': // Add this case
+      case 'reviews':
         return <ReviewSection />;
+      case 'community':
+        return <CommunitySection />;
       default:
         return <HeroSection />;
     }
   };
 
   return (
-    <div className="flex flex-col bg-slate-900 min-h-screen">
+    <div className="flex flex-col min-h-screen" style={{ background: 'var(--admin-bg)' }}>
       <Navbar />
-      <div className="flex flex-1">
+      <div className="flex flex-1 overflow-hidden">
         <Sidebar activeSection={activeSection} onSectionChange={setActiveSection} />
-        <main className="flex-1 p-8 overflow-y-auto bg-slate-900">
-          {renderSection()}
+        <main
+          className="flex-1 overflow-y-auto"
+          style={{ padding: '28px 36px', background: 'var(--admin-bg)' }}
+        >
+          <div style={{ maxWidth: '100%' }}>
+            {renderSection()}
+          </div>
         </main>
       </div>
     </div>

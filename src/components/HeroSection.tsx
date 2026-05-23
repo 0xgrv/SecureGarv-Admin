@@ -1,6 +1,13 @@
-import { useState, useEffect } from 'react';
-import { Save, Eye, ArrowRight, X, Link, Loader2, User, Brain, Rocket, Briefcase } from 'lucide-react';
+﻿import { useState, useEffect, useCallback } from 'react';
+import {
+  Save, Eye, X, LinkIcon, Loader2, User, Brain, Rocket,
+  Briefcase, Tag, BookOpen, Plus, Trash2, GripVertical,
+} from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
+
+// ─────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────
 
 interface AboutContent {
   whoIAm: string;
@@ -9,668 +16,778 @@ interface AboutContent {
   myJourney: string;
 }
 
+interface HeroTag {
+  label: string;
+  color: string;
+}
+
+interface Publications {
+  title: string;
+  description: string;
+  url: string;
+  buttonLabel: string;
+  isVisible: boolean;
+}
+
 interface HeroContent {
   typewriterTexts: string[];
   heroParagraph: string;
-  resume: {
-    url: string;
-    fileName: string;
-  };
+  resume: { url: string; fileName: string };
+  heroTags: HeroTag[];
+  publications: Publications;
   about: AboutContent;
 }
 
-interface APIError {
-  message: string;
-  status?: number;
+// ─────────────────────────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────────────────────────
+
+const API_URL = import.meta.env.VITE_API_URL || '';
+const API_KEY = import.meta.env.VITE_ADMIN_API_KEY || '';
+
+const DEFAULT_CONTENT: HeroContent = {
+  typewriterTexts: [],
+  heroParagraph: '',
+  resume: { url: '', fileName: '' },
+  heroTags: [],
+  publications: {
+    title: 'Poetry & Writing on Amazon',
+    description: '',
+    url: '',
+    buttonLabel: 'View Books',
+    isVisible: true,
+  },
+  about: { whoIAm: '', myExpertise: '', myMission: '', myJourney: '' },
+};
+
+const TAG_PRESETS = [
+  { name: 'Teal', value: '#3ecfb3' },
+  { name: 'Purple', value: '#7c6af7' },
+  { name: 'Amber', value: '#e8a44a' },
+  { name: 'Rose', value: '#f06b8b' },
+  { name: 'Blue', value: '#60a5fa' },
+  { name: 'Green', value: '#4ade80' },
+];
+
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
+
+const apiHeaders = {
+  'Content-Type': 'application/json',
+  'x-api-key': API_KEY,
+};
+
+async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${API_URL}${endpoint}`, {
+    ...options,
+    headers: { ...apiHeaders, ...options.headers },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { message?: string }).message || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
 }
 
-const API_URL = import.meta.env.VITE_API_URL;
-const API_KEY = import.meta.env.VITE_ADMIN_API_KEY;
+// ─────────────────────────────────────────────────────────────
+// FormField Component
+// ─────────────────────────────────────────────────────────────
+
+interface FormFieldProps {
+  label: string;
+  error?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}
+
+const FormField = ({ label, error, required, children }: FormFieldProps) => (
+  <div className="w-full">
+    <label className="admin-label block mb-1">
+      {label}{required && <span className="text-[#f06b8b] ml-1">*</span>}
+    </label>
+    {children}
+    {error && (
+      <p className="mt-1 text-xs flex items-center gap-1 text-[#f06b8b]">
+        <X size={10} /> {error}
+      </p>
+    )}
+  </div>
+);
+
+// ─────────────────────────────────────────────────────────────
+// Main Component
+// ─────────────────────────────────────────────────────────────
 
 export default function HeroEditor() {
-  const [content, setContent] = useState<HeroContent>({
-    typewriterTexts: [],
-    heroParagraph: '',
-    resume: {
-      url: '',
-      fileName: ''
-    },
-    about: {
-      whoIAm: '',
-      myExpertise: '',
-      myMission: '',
-      myJourney: ''
-    }
-  });
-  const [newText, setNewText] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [resumeLink, setResumeLink] = useState('');
+  const [content, setContent] = useState<HeroContent>(DEFAULT_CONTENT);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [tagLabel, setTagLabel] = useState('');
+  const [tagColor, setTagColor] = useState('#3ecfb3');
   const [showResumeModal, setShowResumeModal] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [resumeDraft, setResumeDraft] = useState('');
+  const [newTypeText, setNewTypeText] = useState('');
 
-  // Enhanced API client with better error handling
-  const apiClient = async <T,>(endpoint: string, options: RequestInit = {}): Promise<T> => {
-    const headers = {
-      'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
-      ...options.headers
-    };
+  // ─────────────────────────────────────────────────────────────
+  // Fetch Content
+  // ─────────────────────────────────────────────────────────────
 
+  const fetchContent = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}${endpoint}`, { 
-        ...options, 
-        headers 
+      setLoading(true);
+      const data = await apiFetch<HeroContent>('/api/content');
+      setContent({
+        typewriterTexts: data.typewriterTexts || [],
+        heroParagraph: data.heroParagraph || '',
+        resume: data.resume || { url: '', fileName: '' },
+        heroTags: data.heroTags || [],
+        publications: data.publications || DEFAULT_CONTENT.publications,
+        about: data.about || DEFAULT_CONTENT.about,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw {
-          message: errorData.message || `Request failed with status ${response.status}`,
-          status: response.status
-        } as APIError;
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('API Error:', error);
-      throw error;
+      setResumeDraft(data.resume?.url || '');
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to load content');
+    } finally {
+      setLoading(false);
     }
-  };
-
-  // Fetch content from API
-  useEffect(() => {
-    const fetchContent = async () => {
-      try {
-        setIsLoading(true);
-        const data = await apiClient<HeroContent>('/api/content');
-        
-        setContent({
-          typewriterTexts: data.typewriterTexts || [],
-          heroParagraph: data.heroParagraph || '',
-          resume: data.resume || { url: '', fileName: '' },
-          about: data.about || {
-            whoIAm: '',
-            myExpertise: '',
-            myMission: '',
-            myJourney: ''
-          }
-        });
-        setResumeLink(data.resume?.url || '');
-        toast.success('Content loaded successfully!');
-      } catch (error) {
-        const err = error as APIError;
-        console.error('Error fetching content:', err);
-        toast.error(err.message || 'Failed to load content');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchContent();
   }, []);
 
-  // Validate form fields
-  const validateField = (field: string, value: string): boolean => {
-    const errors = { ...validationErrors };
-    
-    if (!value.trim()) {
-      errors[field] = 'This field is required';
-    } else {
-      delete errors[field];
-    }
+  useEffect(() => { fetchContent(); }, [fetchContent]);
 
-    setValidationErrors(errors);
-    return !errors[field];
+  // ─────────────────────────────────────────────────────────────
+  // Typewriter Management
+  // ─────────────────────────────────────────────────────────────
+
+  const addTypeText = () => {
+    const trimmed = newTypeText.trim();
+    if (!trimmed) { setErrors({ typeText: 'Enter text first' }); return; }
+    if (content.typewriterTexts.includes(trimmed)) { toast.error('Already in list'); return; }
+    setContent(prev => ({ ...prev, typewriterTexts: [...prev.typewriterTexts, trimmed] }));
+    setNewTypeText('');
+    setErrors({});
   };
 
-  const addText = () => {
-    if (!validateField('newText', newText)) return;
-    
-    if (content.typewriterTexts.includes(newText.trim())) {
-      toast.error('This text already exists');
+  const removeTypeText = (i: number) =>
+    setContent(prev => ({ ...prev, typewriterTexts: prev.typewriterTexts.filter((_, idx) => idx !== i) }));
+
+  // ─────────────────────────────────────────────────────────────
+  // Tag Management
+  // ─────────────────────────────────────────────────────────────
+
+  const addTag = () => {
+    const trimmed = tagLabel.trim();
+    if (!trimmed) { setErrors({ tagLabel: 'Enter a label' }); return; }
+    if (content.heroTags.length >= 10) { toast.error('Max 10 tags'); return; }
+    if (content.heroTags.some(t => t.label === trimmed)) { toast.error('Tag already exists'); return; }
+    setContent(prev => ({
+      ...prev,
+      heroTags: [...prev.heroTags, { label: trimmed, color: tagColor }],
+    }));
+    setTagLabel('');
+    setErrors({});
+  };
+
+  const removeTag = (i: number) =>
+    setContent(prev => ({ ...prev, heroTags: prev.heroTags.filter((_, idx) => idx !== i) }));
+
+  // ─────────────────────────────────────────────────────────────
+  // About Management
+  // ─────────────────────────────────────────────────────────────
+
+  const setAbout = (field: keyof AboutContent, value: string) => {
+    setContent(prev => ({ ...prev, about: { ...prev.about, [field]: value } }));
+    if (!value.trim()) setErrors(prev => ({ ...prev, [field]: 'Required' }));
+    else setErrors(prev => { const next = { ...prev }; delete next[field]; return next; });
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Publications Management
+  // ─────────────────────────────────────────────────────────────
+
+  const setPub = (field: keyof Publications, value: string | boolean) =>
+    setContent(prev => ({ ...prev, publications: { ...prev.publications, [field]: value } }));
+
+  // ─────────────────────────────────────────────────────────────
+  // Save Handlers
+  // ─────────────────────────────────────────────────────────────
+
+  const saveHero = async () => {
+    if (!content.heroParagraph.trim()) {
+      setErrors({ heroParagraph: 'Introduction is required' });
+      toast.error('Fill in the introduction first');
       return;
     }
-
-    setContent(prev => ({
-      ...prev,
-      typewriterTexts: [...prev.typewriterTexts, newText.trim()]
-    }));
-    setNewText('');
-    toast.success('Text added successfully!');
-  };
-
-  const removeText = (index: number) => {
-    setContent(prev => ({
-      ...prev,
-      typewriterTexts: prev.typewriterTexts.filter((_, i) => i !== index)
-    }));
-    toast.success('Text removed successfully!');
-  };
-
-  const handleAboutChange = (field: keyof AboutContent, value: string) => {
-    setContent(prev => ({
-      ...prev,
-      about: {
-        ...prev.about,
-        [field]: value
-      }
-    }));
-    validateField(field, value);
-  };
-
-  const saveAboutSection = async () => {
-    const requiredFields: (keyof AboutContent)[] = ['whoIAm', 'myExpertise', 'myMission', 'myJourney'];
-    let isValid = true;
-    
-    requiredFields.forEach(field => {
-      if (!validateField(field, content.about[field])) {
-        isValid = false;
-      }
-    });
-
-    if (!isValid) {
-      toast.error('Please fill in all required fields in the About section');
-      return;
-    }
-
-    setIsSaving(true);
+    setSaving('hero');
     try {
-      await apiClient('/api/content/about', {
-        method: 'PUT',
-        body: JSON.stringify(content.about)
-      });
-      toast.success('About section saved successfully!');
-    } catch (error) {
-      const err = error as APIError;
-      console.error('Error saving about section:', err);
-      toast.error(err.message || 'Failed to save about section');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleSave = async () => {
-    const heroValid = validateField('heroParagraph', content.heroParagraph);
-    const aboutValid = ['whoIAm', 'myExpertise', 'myMission', 'myJourney'].every(field => 
-      validateField(field, content.about[field as keyof AboutContent])
-    );
-
-    if (!heroValid || !aboutValid) {
-      toast.error('Please fill in all required fields');
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      await apiClient('/api/content', {
+      await apiFetch('/api/content', {
         method: 'PUT',
         body: JSON.stringify({
           typewriterTexts: content.typewriterTexts,
           heroParagraph: content.heroParagraph,
           resume: content.resume,
-          about: content.about
-        })
+        }),
       });
-      toast.success('All content saved successfully!');
-    } catch (error) {
-      const err = error as APIError;
-      console.error('Error saving content:', err);
-      toast.error(err.message || 'Failed to save content');
+      toast.success('Hero content saved');
+    } catch (err) {
+      toast.error((err as Error).message);
     } finally {
-      setIsSaving(false);
+      setSaving(null);
     }
   };
 
-  const updateResumeLink = async () => {
-    if (!validateField('resumeLink', resumeLink)) return;
-
+  const saveHeroTags = async () => {
+    setSaving('tags');
     try {
-      new URL(resumeLink); // Validate URL format
-    } catch {
-      toast.error('Please enter a valid URL');
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      const updatedResume = {
-        url: resumeLink,
-        fileName: resumeLink.split('/').pop() || 'Resume'
-      };
-
-      // Send the entire content structure but only update the resume portion
-      const updatedContent = {
-        ...content,
-        resume: updatedResume
-      };
-
-      const data = await apiClient<HeroContent>('/api/content', {
+      await apiFetch('/api/content/hero-tags', {
         method: 'PUT',
-        body: JSON.stringify(updatedContent)
+        body: JSON.stringify({ heroTags: content.heroTags }),
       });
+      toast.success('Role tags saved');
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSaving(null);
+    }
+  };
 
-      setContent(data);
-      toast.success('Resume link updated successfully!');
+  const savePublications = async () => {
+    if (content.publications.url && content.publications.url.trim()) {
+      try { new URL(content.publications.url); }
+      catch { toast.error('Enter a valid URL'); return; }
+    }
+    setSaving('publications');
+    try {
+      await apiFetch('/api/content/publications', {
+        method: 'PUT',
+        body: JSON.stringify(content.publications),
+      });
+      toast.success('Publications saved');
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const saveAbout = async () => {
+    const fields: (keyof AboutContent)[] = ['whoIAm', 'myExpertise', 'myMission', 'myJourney'];
+    let valid = true;
+    fields.forEach(f => {
+      if (!content.about[f].trim()) {
+        setErrors(prev => ({ ...prev, [f]: 'Required' }));
+        valid = false;
+      }
+    });
+    if (!valid) { toast.error('Fill in all About fields'); return; }
+    setSaving('about');
+    try {
+      await apiFetch('/api/content/about', {
+        method: 'PUT',
+        body: JSON.stringify(content.about),
+      });
+      toast.success('About section saved');
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const updateResume = async () => {
+    if (!resumeDraft.trim()) { toast.error('Enter a URL'); return; }
+    try { new URL(resumeDraft); } catch { toast.error('Invalid URL'); return; }
+    setSaving('resume');
+    try {
+      const updated = await apiFetch<HeroContent>('/api/content', {
+        method: 'PUT',
+        body: JSON.stringify({
+          ...content,
+          resume: {
+            url: resumeDraft.trim(),
+            fileName: resumeDraft.trim().split('/').pop() || 'Resume',
+          },
+        }),
+      });
+      setContent(prev => ({ ...prev, resume: updated.resume }));
+      toast.success('Resume updated');
       setShowResumeModal(false);
-    } catch (error) {
-      const err = error as APIError;
-      console.error('Error updating resume:', err);
-      toast.error(err.message || 'Failed to update resume');
+    } catch (err) {
+      toast.error((err as Error).message);
     } finally {
-      setIsSaving(false);
+      setSaving(null);
     }
   };
 
-  const removeResume = async () => {
-    try {
-      await apiClient('/api/content', {
-        method: 'PUT',
-        body: JSON.stringify({ url: '', fileName: '' })
-      });
+  // ─────────────────────────────────────────────────────────────
+  // Loading State
+  // ─────────────────────────────────────────────────────────────
 
-      setContent(prev => ({
-        ...prev,
-        resume: { url: '', fileName: '' }
-      }));
-      toast.success('Resume removed successfully!');
-    } catch (error) {
-      const err = error as APIError;
-      console.error('Error removing resume:', err);
-      toast.error(err.message || 'Failed to remove resume');
-    }
-  };
-
-   if (isLoading) {
+  if (loading) {
     return (
-      <div className="flex justify-center items-center h-screen bg-gradient-to-br from-gray-900 to-gray-800">
-        <div className="text-center space-y-4">
-          <Loader2 className="animate-spin h-12 w-12 text-blue-400 mx-auto" />
-          <p className="text-gray-400 font-medium">Loading content...</p>
-        </div>
+      <div className="flex items-center justify-center py-24">
+        <Loader2 size={28} className="animate-spin" style={{ color: '#7c6af7' }} />
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-gray-100 p-4 md:p-6">
-      <Toaster position="top-right" toastOptions={{
-        style: {
-          background: '#111827',
-          color: '#F3F4F6',
-          border: '1px solid #1F2937',
-          borderRadius: '0.5rem',
-          padding: '0.75rem 1rem'
-        }
-      }}/>
-      
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-              Content Editor
-            </h1>
-            <p className="text-gray-400 mt-1">Manage your portfolio's hero and about sections</p>
-          </div>
-          <div className="text-sm text-gray-400 bg-gray-800/50 px-3 py-2 rounded-lg">
-            Last Updated: {new Date().toLocaleString()}
-          </div>
-        </div>
-        
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Main Content */}
-          <div className="space-y-6 lg:col-span-2">
-            {/* Hero Section Card */}
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold text-gray-200 flex items-center gap-2">
-                  <span className="bg-blue-500/20 p-2 rounded-lg">
-                    <Rocket size={20} className="text-blue-400" />
-                  </span>
-                  Hero Section
-                </h2>
-                <div className="text-xs bg-gray-700 px-2 py-1 rounded-md text-gray-300">
-                  Required Fields
-                </div>
-              </div>
-              
-              <div className="space-y-6">
-                {/* Hero Paragraph */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2 items-center gap-1">
-                    Introduction
-                    <span className="text-red-400">*</span>
-                  </label>
-                  <div className="relative">
-                    <textarea
-                      value={content.heroParagraph}
-                      onChange={(e) => {
-                        setContent({...content, heroParagraph: e.target.value});
-                        validateField('heroParagraph', e.target.value);
-                      }}
-                      onBlur={(e) => validateField('heroParagraph', e.target.value)}
-                      rows={4}
-                      className={`w-full p-3 bg-gray-700/70 border ${
-                        validationErrors.heroParagraph ? 'border-red-500/80' : 'border-gray-600/50'
-                      } rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition text-gray-100 placeholder-gray-500`}
-                      placeholder="Write your compelling introduction here..."
-                    />
-                    <div className="absolute bottom-3 right-3 text-xs text-gray-500">
-                      {content.heroParagraph.length}/500
-                    </div>
-                  </div>
-                  {validationErrors.heroParagraph && (
-                    <p className="mt-1 text-xs text-red-400 flex items-center gap-1">
-                      <X size={12} /> {validationErrors.heroParagraph}
-                    </p>
-                  )}
-                </div>
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
 
-                {/* Typewriter Texts */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Rotating Headlines
-                  </label>
-                  <div className="flex flex-col sm:flex-row gap-2 mb-3">
-                    <div className="relative flex-1">
-                      <input
-                        type="text"
-                        value={newText}
-                        onChange={(e) => setNewText(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && addText()}
-                        onBlur={(e) => validateField('newText', e.target.value)}
-                        className={`w-full p-2 pl-3 pr-10 bg-gray-700/70 border ${
-                          validationErrors.newText ? 'border-red-500/80' : 'border-gray-600/50'
-                        } rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition text-gray-100 placeholder-gray-500`}
-                        placeholder="Add a new rotating headline"
-                      />
-                      <button
-                        onClick={addText}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-blue-400 transition"
-                        title="Add text"
-                      >
-                        <ArrowRight size={18} />
-                      </button>
-                    </div>
-                  </div>
-                  {validationErrors.newText && (
-                    <p className="mt-1 text-xs text-red-400 flex items-center gap-1">
-                      <X size={12} /> {validationErrors.newText}
-                    </p>
-                  )}
-                  
-                  <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                    {content.typewriterTexts.length === 0 ? (
-                      <div className="p-3 bg-gray-700/30 rounded-lg text-center text-gray-500 border border-dashed border-gray-600/50">
-                        No headlines added yet
-                      </div>
-                    ) : (
-                      content.typewriterTexts.map((text, index) => (
-                        <div key={index} className="flex justify-between items-center p-3 bg-gray-700/40 rounded-lg group hover:bg-gray-700/60 transition border border-gray-700/30">
-                          <span className="text-gray-100 truncate">{text}</span>
-                          <button
-                            onClick={() => removeText(index)}
-                            className="text-gray-400 hover:text-red-400 transition p-1 rounded-full hover:bg-gray-600/50"
-                            aria-label="Remove text"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
+  return (
+    <div className="w-full max-w-full overflow-x-hidden px-3 sm:px-4">
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          style: {
+            background: '#0d1220',
+            color: '#e8edf5',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 10,
+            fontSize: 13,
+          },
+        }}
+      />
+
+      {/* Page header */}
+      <div className="mb-6">
+        <p className="text-xs uppercase tracking-wider text-[#687081] mb-1">Content Editor</p>
+        <h1 className="text-2xl font-bold text-white">Home Content</h1>
+        <p className="text-sm mt-1 text-[#687081]">Manage hero, role tags, publications and about sections.</p>
+      </div>
+
+      {/* Responsive Grid */}
+      <div className="flex flex-col lg:grid lg:grid-cols-2 gap-6">
+        {/* LEFT COLUMN */}
+        <div className="space-y-6 w-full">
+
+          {/* Hero Section */}
+          <div className="bg-[#0d1220] rounded-2xl border border-white/5 p-4 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-[rgba(124,106,247,0.12)] border border-[rgba(124,106,247,0.2)]">
+                  <Rocket size={15} style={{ color: '#7c6af7' }} />
                 </div>
+                <h2 className="font-semibold text-sm text-white">Hero Content</h2>
               </div>
+              <button
+                onClick={saveHero}
+                disabled={saving === 'hero'}
+                className="admin-btn-primary text-xs py-2 px-4 rounded-lg bg-[#7c6af7] text-white hover:bg-[#6a58e0] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {saving === 'hero' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                {saving === 'hero' ? 'Saving…' : 'Save Hero'}
+              </button>
             </div>
 
-            {/* About Section Card */}
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold text-gray-200 flex items-center gap-2">
-                  <span className="bg-purple-500/20 p-2 rounded-lg">
-                    <User size={20} className="text-purple-400" />
-                  </span>
-                  About Section
-                </h2>
-                <button
-                  onClick={saveAboutSection}
-                  disabled={isSaving}
-                  className={`flex items-center gap-1 px-3 py-1 text-sm rounded-lg ${
-                    isSaving ? 'bg-blue-600/50 text-blue-200' : 'bg-blue-600/80 hover:bg-blue-600 text-white'
-                  } transition`}
-                >
-                  {isSaving ? (
-                    <Loader2 className="animate-spin h-4 w-4" />
-                  ) : (
-                    <Save size={16} />
-                  )}
-                  {isSaving ? 'Saving...' : 'Save'}
+            <FormField label="Introduction paragraph" error={errors.heroParagraph} required>
+              <div className="relative">
+                <textarea
+                  value={content.heroParagraph}
+                  onChange={e => {
+                    setContent(prev => ({ ...prev, heroParagraph: e.target.value }));
+                    if (e.target.value.trim()) {
+                      setErrors(prev => { const next = { ...prev }; delete next.heroParagraph; return next; });
+                    }
+                  }}
+                  rows={5}
+                  maxLength={1000}
+                  className="w-full px-4 py-2 rounded-xl bg-[rgba(255,255,255,0.03)] border border-white/10 text-white text-sm focus:outline-none focus:border-[#7c6af7] transition-colors"
+                  placeholder="Write your compelling introduction here…"
+                />
+                <span className="absolute bottom-2.5 right-3 text-[10px] text-[#687081]">
+                  {content.heroParagraph.length}/1000
+                </span>
+              </div>
+            </FormField>
+
+            <FormField label="Rotating typewriter lines">
+              <div className="flex flex-col sm:flex-row gap-2 mb-3">
+                <input
+                  type="text"
+                  value={newTypeText}
+                  onChange={e => setNewTypeText(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTypeText())}
+                  className="flex-1 px-4 py-2 rounded-xl bg-[rgba(255,255,255,0.03)] border border-white/10 text-white text-sm focus:outline-none focus:border-[#7c6af7]"
+                  placeholder="e.g. Security Analyst & Penetration Tester"
+                />
+                <button onClick={addTypeText} className="admin-btn-ghost px-4 py-2 text-xs rounded-lg bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1">
+                  <Plus size={13} /> Add
                 </button>
               </div>
-              
-              <div className="space-y-5">
-                {[
-                  { field: 'whoIAm', label: 'Who I Am', icon: <User size={16} className="text-blue-400" /> },
-                  { field: 'myExpertise', label: 'My Expertise', icon: <Brain size={16} className="text-green-400" /> },
-                  { field: 'myMission', label: 'My Mission', icon: <Rocket size={16} className="text-purple-400" /> },
-                  { field: 'myJourney', label: 'From Curiosity to Cybersecurity', icon: <Briefcase size={16} className="text-yellow-400" /> }
-                ].map(({ field, label, icon }) => (
-                  <div key={field}>
-                    <label className="block text-sm font-medium text-gray-300 mb-2 items-center gap-1">
-                      {icon} {label}
-                      <span className="text-red-400">*</span>
-                    </label>
-                    <textarea
-                      value={content.about[field as keyof AboutContent]}
-                      onChange={(e) => handleAboutChange(field as keyof AboutContent, e.target.value)}
-                      onBlur={(e) => validateField(field, e.target.value)}
-                      rows={3}
-                      className={`w-full p-3 bg-gray-700/70 border ${
-                        validationErrors[field] ? 'border-red-500/80' : 'border-gray-600/50'
-                      } rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition text-gray-100 placeholder-gray-500`}
-                      placeholder={`Describe ${label.toLowerCase()}...`}
+              {content.typewriterTexts.length === 0 ? (
+                <p className="text-xs text-center py-4 rounded-lg text-[#687081] border border-dashed border-white/10">
+                  No typewriter lines yet
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-52 overflow-y-auto">
+                  {content.typewriterTexts.map((text, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg group bg-white/5 border border-white/10"
+                    >
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <GripVertical size={13} className="text-[#687081] flex-shrink-0" />
+                        <span className="text-sm text-white font-mono truncate">{text}</span>
+                      </div>
+                      <button
+                        onClick={() => removeTypeText(i)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-[#f06b8b] flex-shrink-0"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </FormField>
+          </div>
+
+          {/* Role Badges */}
+          <div className="bg-[#0d1220] rounded-2xl border border-white/5 p-4 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-[rgba(62,207,179,0.12)] border border-[rgba(62,207,179,0.2)]">
+                  <Tag size={15} style={{ color: '#3ecfb3' }} />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-sm text-white">Role Badges</h2>
+                  <p className="text-[11px] text-[#687081]">Shown below the CTA buttons on the hero</p>
+                </div>
+              </div>
+              <button
+                onClick={saveHeroTags}
+                disabled={saving === 'tags'}
+                className="admin-btn-primary text-xs py-2 px-4 rounded-lg bg-[#7c6af7] text-white hover:bg-[#6a58e0] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {saving === 'tags' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                {saving === 'tags' ? 'Saving…' : 'Save Tags'}
+              </button>
+            </div>
+
+            <div className="rounded-xl p-4 space-y-3 bg-white/5 border border-white/10">
+              <p className="admin-label text-sm text-white mb-2">Add new tag</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={tagLabel}
+                  onChange={e => setTagLabel(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                  maxLength={60}
+                  className="flex-1 px-4 py-2 rounded-xl bg-[rgba(255,255,255,0.03)] border border-white/10 text-white text-sm focus:outline-none focus:border-[#7c6af7]"
+                  placeholder="e.g. VAPT Analyst"
+                />
+                <button onClick={addTag} className="admin-btn-ghost px-4 py-2 text-xs rounded-lg bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1">
+                  <Plus size={13} /> Add
+                </button>
+              </div>
+
+              <div>
+                <p className="admin-label text-sm text-white mb-2">Badge colour</p>
+                <div className="flex flex-wrap gap-2">
+                  {TAG_PRESETS.map(({ name, value }) => (
+                    <button
+                      key={value}
+                      onClick={() => setTagColor(value)}
+                      title={name}
+                      className="w-6 h-6 rounded-full transition-transform hover:scale-110"
+                      style={{
+                        background: value,
+                        outline: tagColor === value ? `2px solid ${value}` : '2px solid transparent',
+                        outlineOffset: 2,
+                      }}
                     />
-                    {validationErrors[field] && (
-                      <p className="mt-1 text-xs text-red-400 flex items-center gap-1">
-                        <X size={12} /> {validationErrors[field]}
-                      </p>
-                    )}
-                  </div>
+                  ))}
+                  <label className="flex items-center gap-1.5 px-2 py-1 rounded-full text-xs cursor-pointer bg-white/5 border border-white/10 text-[#687081]">
+                    <input
+                      type="color"
+                      value={tagColor}
+                      onChange={e => setTagColor(e.target.value)}
+                      className="w-4 h-4 rounded cursor-pointer border-0 bg-transparent"
+                    />
+                    Custom
+                  </label>
+                </div>
+              </div>
+
+              {tagLabel && (
+                <div className="flex items-center gap-2">
+                  <p className="text-[11px] text-[#687081]">Preview:</p>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono bg-white/5 border border-white/10 text-[#687081]">
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: tagColor }} />
+                    {tagLabel}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {content.heroTags.length === 0 ? (
+              <p className="text-xs text-center py-4 rounded-lg text-[#687081] border border-dashed border-white/10">
+                No role badges yet — add some above
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {content.heroTags.map((tag, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono group bg-white/5 border border-white/10 text-[#687081]"
+                  >
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: tag.color }} />
+                    <span className="truncate max-w-[150px]">{tag.label}</span>
+                    <button
+                      onClick={() => removeTag(i)}
+                      className="opacity-50 hover:opacity-100 transition-opacity ml-0.5 text-[#f06b8b]"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
                 ))}
               </div>
-            </div>
+            )}
           </div>
+        </div>
 
-          {/* Right Column - Sidebar */}
-          <div className="space-y-6">
-            {/* Resume Card */}
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold text-gray-200 flex items-center gap-2">
-                  <span className="bg-green-500/20 p-2 rounded-lg">
-                    <Link size={20} className="text-green-400" />
-                  </span>
-                  Resume
-                </h2>
-                {content.resume?.url && (
-                  <a 
-                    href={content.resume.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs flex items-center gap-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 px-2 py-1 rounded transition"
-                  >
-                    <Eye size={14} /> View
-                  </a>
-                )}
-              </div>
-              
-              <div className="border border-gray-700/40 rounded-lg p-4 bg-gray-700/20">
-                {content.resume?.url ? (
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-xs text-gray-400 mb-1">File Name</p>
-                      <p className="font-medium text-gray-200 truncate">
-                        {content.resume.fileName || 'Resume'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-400 mb-1">URL</p>
-                      <p className="text-blue-400 text-sm truncate">
-                        {content.resume.url}
-                      </p>
-                    </div>
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        onClick={() => {
-                          setResumeLink(content.resume.url);
-                          setShowResumeModal(true);
-                        }}
-                        className="flex-1 text-sm py-1.5 bg-gray-700/50 hover:bg-gray-700/70 text-gray-300 rounded transition flex items-center justify-center gap-1"
-                      >
-                        <Eye size={14} /> Edit
-                      </button>
-                      <button
-                        onClick={removeResume}
-                        className="flex-1 text-sm py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded transition flex items-center justify-center gap-1"
-                      >
-                        <X size={14} /> Remove
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setShowResumeModal(true)}
-                    className="w-full py-4 border-2 border-dashed border-gray-600/50 rounded-lg hover:bg-gray-700/30 flex flex-col items-center justify-center gap-2 text-gray-300 transition group"
-                  >
-                    <div className="p-3 bg-gray-700/50 rounded-full group-hover:bg-gray-700/70 transition">
-                      <Link size={20} className="text-gray-400 group-hover:text-blue-400" />
-                    </div>
-                    <span className="font-medium">Add Resume Link</span>
-                    <span className="text-xs text-gray-500">PDF or online document</span>
-                  </button>
-                )}
-              </div>
-            </div>
+        {/* RIGHT COLUMN */}
+        <div className="space-y-6 w-full">
 
-            {/* Save All Card */}
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg">
-              <h2 className="text-xl font-semibold text-gray-200 mb-4 flex items-center gap-2">
-                <span className="bg-blue-500/20 p-2 rounded-lg">
-                  <Save size={20} className="text-blue-400" />
-                </span>
-                Save Changes
-              </h2>
-              
-              <div className="space-y-4">
-                <p className="text-sm text-gray-400">
-                  Review all sections before saving. Required fields are marked with <span className="text-red-400">*</span>.
-                </p>
-                
-                <button
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className={`w-full py-3 rounded-lg transition flex items-center justify-center gap-2 ${
-                    isSaving 
-                      ? 'bg-blue-600/70 text-blue-200 cursor-not-allowed' 
-                      : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white shadow-lg'
-                  }`}
-                >
-                  {isSaving ? (
-                    <>
-                      <Loader2 className="animate-spin h-5 w-5" />
-                      Saving Changes...
-                    </>
-                  ) : (
-                    <>
-                      <Save size={18} />
-                      Save All Changes
-                    </>
-                  )}
-                </button>
-                
-                <div className="text-xs text-gray-500 text-center">
-                  Last saved changes will overwrite previous content
+          {/* Publications */}
+          <div className="bg-[#0d1220] rounded-2xl border border-white/5 p-4 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-[rgba(232,164,74,0.12)] border border-[rgba(232,164,74,0.2)]">
+                  <BookOpen size={15} style={{ color: '#e8a44a' }} />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-sm text-white">Publications Highlight</h2>
+                  <p className="text-[11px] text-[#687081]">Card shown above the blog posts grid</p>
                 </div>
               </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <div
+                    className="relative w-9 h-5 rounded-full transition-colors cursor-pointer"
+                    style={{ background: content.publications.isVisible ? 'rgba(124,106,247,0.4)' : 'rgba(255,255,255,0.08)' }}
+                    onClick={() => setPub('isVisible', !content.publications.isVisible)}
+                  >
+                    <div
+                      className="absolute top-0.5 w-4 h-4 rounded-full transition-transform"
+                      style={{
+                        background: content.publications.isVisible ? '#7c6af7' : '#687081',
+                        transform: content.publications.isVisible ? 'translateX(20px)' : 'translateX(2px)',
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs text-[#687081]">
+                    {content.publications.isVisible ? 'Visible' : 'Hidden'}
+                  </span>
+                </label>
+                <button
+                  onClick={savePublications}
+                  disabled={saving === 'publications'}
+                  className="admin-btn-primary text-xs py-2 px-4 rounded-lg bg-[#7c6af7] text-white hover:bg-[#6a58e0] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {saving === 'publications' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                  {saving === 'publications' ? 'Saving…' : 'Save'}
+                </button>
+              </div>
             </div>
+
+            <div className="flex flex-col sm:grid sm:grid-cols-2 gap-4">
+              <FormField label="Card title" required>
+                <input
+                  type="text"
+                  value={content.publications.title}
+                  onChange={e => setPub('title', e.target.value)}
+                  maxLength={200}
+                  className="w-full px-4 py-2 rounded-xl bg-[rgba(255,255,255,0.03)] border border-white/10 text-white text-sm focus:outline-none focus:border-[#7c6af7]"
+                  placeholder="Poetry & Writing on Amazon"
+                />
+              </FormField>
+              <FormField label="Button label">
+                <input
+                  type="text"
+                  value={content.publications.buttonLabel}
+                  onChange={e => setPub('buttonLabel', e.target.value)}
+                  maxLength={50}
+                  className="w-full px-4 py-2 rounded-xl bg-[rgba(255,255,255,0.03)] border border-white/10 text-white text-sm focus:outline-none focus:border-[#7c6af7]"
+                  placeholder="View Books"
+                />
+              </FormField>
+            </div>
+
+            <FormField label="Short description">
+              <textarea
+                value={content.publications.description}
+                onChange={e => setPub('description', e.target.value)}
+                rows={2}
+                maxLength={500}
+                className="w-full px-4 py-2 rounded-xl bg-[rgba(255,255,255,0.03)] border border-white/10 text-white text-sm focus:outline-none focus:border-[#7c6af7]"
+                placeholder="Published poet and author. Available on Amazon…"
+              />
+            </FormField>
+
+            <FormField label="URL" error={errors.pubUrl}>
+              <input
+                type="url"
+                value={content.publications.url}
+                onChange={e => {
+                  setPub('url', e.target.value);
+                  setErrors(prev => { const next = { ...prev }; delete next.pubUrl; return next; });
+                }}
+                maxLength={500}
+                className="w-full px-4 py-2 rounded-xl bg-[rgba(255,255,255,0.03)] border border-white/10 text-white text-sm focus:outline-none focus:border-[#7c6af7]"
+                placeholder="https://www.amazon.in/stores/…"
+              />
+            </FormField>
+          </div>
+
+          {/* Resume Section */}
+          <div className="bg-[#0d1220] rounded-2xl border border-white/5 p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-[rgba(62,207,179,0.12)] border border-[rgba(62,207,179,0.2)]">
+                  <LinkIcon size={15} style={{ color: '#3ecfb3' }} />
+                </div>
+                <h2 className="font-semibold text-sm text-white">Resume Link</h2>
+              </div>
+              {content.resume?.url && (
+                <a
+                  href={content.resume.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-[#3ecfb3] hover:underline"
+                >
+                  <Eye size={13} /> View
+                </a>
+              )}
+            </div>
+
+            {content.resume?.url ? (
+              <div className="rounded-xl p-4 space-y-3 bg-white/5 border border-white/10">
+                <div>
+                  <p className="admin-label text-sm text-white mb-1">File name</p>
+                  <p className="text-sm font-mono truncate text-white/80">{content.resume.fileName}</p>
+                </div>
+                <div>
+                  <p className="admin-label text-sm text-white mb-1">URL</p>
+                  <p className="text-xs truncate text-[#7c6af7]">{content.resume.url}</p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <button
+                    onClick={() => { setResumeDraft(content.resume.url); setShowResumeModal(true); }}
+                    className="admin-btn-ghost text-xs py-1.5 px-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                  >
+                    Edit URL
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setSaving('resume');
+                      try {
+                        await apiFetch('/api/content', {
+                          method: 'PUT',
+                          body: JSON.stringify({ ...content, resume: { url: '', fileName: '' } }),
+                        });
+                        setContent(prev => ({ ...prev, resume: { url: '', fileName: '' } }));
+                        toast.success('Resume removed');
+                      } catch (err) {
+                        toast.error((err as Error).message);
+                      } finally { setSaving(null); }
+                    }}
+                    className="admin-btn-danger text-xs py-1.5 px-3 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+                  >
+                    <Trash2 size={12} /> Remove
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setResumeDraft(''); setShowResumeModal(true); }}
+                className="w-full py-8 rounded-xl text-sm flex flex-col items-center gap-2 transition-colors border border-dashed border-white/10 text-[#687081] hover:bg-[rgba(124,106,247,0.04)]"
+              >
+                <LinkIcon size={20} className="text-white/20" />
+                <span>Add resume link</span>
+                <span className="text-xs text-white/20">PDF or Google Drive link</span>
+              </button>
+            )}
+          </div>
+
+          {/* About Section */}
+          <div className="bg-[#0d1220] rounded-2xl border border-white/5 p-4 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-[rgba(124,106,247,0.12)] border border-[rgba(124,106,247,0.2)]">
+                  <User size={15} style={{ color: '#7c6af7' }} />
+                </div>
+                <h2 className="font-semibold text-sm text-white">About Section</h2>
+              </div>
+              <button
+                onClick={saveAbout}
+                disabled={saving === 'about'}
+                className="admin-btn-primary text-xs py-2 px-4 rounded-lg bg-[#7c6af7] text-white hover:bg-[#6a58e0] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {saving === 'about' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                {saving === 'about' ? 'Saving…' : 'Save About'}
+              </button>
+            </div>
+
+            {[
+              { field: 'whoIAm', label: 'Who I Am', rows: 3 },
+              { field: 'myExpertise', label: 'My Expertise', rows: 3 },
+              { field: 'myMission', label: 'My Mission', rows: 3 },
+              { field: 'myJourney', label: 'From Curiosity to Cybersecurity', rows: 4 },
+            ].map(({ field, label, rows }) => (
+              <FormField key={field} label={label} error={errors[field]} required>
+                <textarea
+                  value={content.about[field as keyof AboutContent]}
+                  onChange={e => setAbout(field as keyof AboutContent, e.target.value)}
+                  rows={rows}
+                  maxLength={2000}
+                  className="w-full px-4 py-2 rounded-xl bg-[rgba(255,255,255,0.03)] border border-white/10 text-white text-sm focus:outline-none focus:border-[#7c6af7]"
+                  placeholder={`Describe ${label.toLowerCase()}…`}
+                />
+              </FormField>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Resume Link Modal */}
+      {/* Resume Modal */}
       {showResumeModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-md border border-gray-700/70 animate-pop-in">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold text-gray-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#0d1220] rounded-2xl border border-white/10 p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-semibold text-white">
                 {content.resume?.url ? 'Update Resume' : 'Add Resume'}
-              </h2>
-              <button
-                onClick={() => {
-                  setShowResumeModal(false);
-                  setResumeLink(content.resume?.url || '');
-                }}
-                className="text-gray-400 hover:text-gray-200 transition p-1 rounded-full hover:bg-gray-700/50"
-              >
-                <X size={20} />
+              </h3>
+              <button onClick={() => setShowResumeModal(false)} className="p-1 rounded-lg text-[#687081] hover:text-white">
+                <X size={18} />
               </button>
             </div>
-
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-300 mb-2 items-center gap-1">
-                <Link size={16} className="text-blue-400" />
-                Resume URL
-                <span className="text-red-400">*</span>
-              </label>
+            <FormField label="Resume URL" required>
               <input
                 type="url"
-                value={resumeLink}
-                onChange={(e) => {
-                  setResumeLink(e.target.value);
-                  validateField('resumeLink', e.target.value);
-                }}
-                onBlur={(e) => validateField('resumeLink', e.target.value)}
-                placeholder="https://example.com/resume.pdf"
-                className={`w-full p-3 bg-gray-700/70 border ${
-                  validationErrors.resumeLink ? 'border-red-500/80' : 'border-gray-600/50'
-                } rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition text-gray-100 placeholder-gray-500`}
+                value={resumeDraft}
+                onChange={e => setResumeDraft(e.target.value)}
+                className="w-full px-4 py-2 rounded-xl bg-[rgba(255,255,255,0.03)] border border-white/10 text-white text-sm focus:outline-none focus:border-[#7c6af7]"
+                placeholder="https://drive.google.com/…"
+                autoFocus
               />
-              {validationErrors.resumeLink && (
-                <p className="mt-1 text-xs text-red-400 flex items-center gap-1">
-                  <X size={12} /> {validationErrors.resumeLink}
-                </p>
-              )}
-              <p className="mt-2 text-xs text-gray-500">
-                Tip: Upload your resume to a cloud service like Google Drive or Dropbox and share the link
-              </p>
-            </div>
-
+            </FormField>
+            <p className="text-xs mt-2 mb-5 text-[#687081]">
+              Upload to Google Drive, Dropbox, or any public URL.
+            </p>
             <div className="flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowResumeModal(false);
-                  setResumeLink(content.resume?.url || '');
-                }}
-                className="px-4 py-2 border border-gray-600/50 text-gray-300 rounded-lg hover:bg-gray-700/50 transition"
-              >
+              <button onClick={() => setShowResumeModal(false)} className="admin-btn-ghost text-xs px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors">
                 Cancel
               </button>
               <button
-                onClick={updateResumeLink}
-                disabled={isSaving || !resumeLink.trim()}
-                className={`px-4 py-2 rounded-lg transition ${
-                  isSaving 
-                    ? 'bg-blue-600/70 text-blue-200 cursor-not-allowed' 
-                    : 'bg-blue-600 hover:bg-blue-500 text-white'
-                } flex items-center gap-2`}
+                onClick={updateResume}
+                disabled={saving === 'resume' || !resumeDraft.trim()}
+                className="admin-btn-primary text-xs px-4 py-2 rounded-lg bg-[#7c6af7] text-white hover:bg-[#6a58e0] transition-colors disabled:opacity-50 flex items-center gap-1.5"
               >
-                {isSaving ? (
-                  <Loader2 className="animate-spin h-4 w-4" />
-                ) : (
-                  <Save size={16} />
-                )}
+                {saving === 'resume' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
                 {content.resume?.url ? 'Update' : 'Save'}
               </button>
             </div>

@@ -1,41 +1,48 @@
 import { UserButton, useUser } from '@clerk/clerk-react';
-// import { Bell } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 
 export default function Navbar() {
   const { user } = useUser();
 
   return (
-    <nav className="sticky top-0 z-50 bg-slate-900 border-b border-slate-700 px-6 py-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <h1 className="text-xl font-bold bg-gradient-to-r from-lavender-400 to-purple-400 bg-clip-text text-transparent">
-            SecureGarv Admin
-          </h1>
-          {user && (
-            <div className="hidden md:block">
-              {/* <p className="text-slate-300 text-sm">
-                Welcome back, <span className="text-lavender-400 font-medium">{user.firstName}</span>
-              </p> */}
-            </div>
-          )}
+    <nav className="admin-topbar sticky top-0 z-50">
+      {/* Logo */}
+      <div className="flex items-center gap-2.5">
+        <div
+          className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: 'rgba(124,106,247,0.15)', border: '1px solid rgba(124,106,247,0.3)' }}
+        >
+          <ShieldCheck size={15} style={{ color: '#7c6af7' }} />
         </div>
-        
-        <div className="flex items-center space-x-4">
-          {/* <button className="p-2 text-slate-400 hover:text-lavender-400 hover:bg-slate-800 rounded-lg transition-colors">
-            <Bell size={20} />
-          </button> */}
-          <div className="flex items-center space-x-3">
-            <UserButton 
-              appearance={{
-                elements: {
-                  avatarBox: "w-8 h-8",
-                  userButtonPopoverCard: "bg-slate-800 border-slate-700",
-                  userButtonPopoverActionButton: "text-slate-300 hover:bg-slate-700"
-                }
-              }}
-            />
-          </div>
-        </div>
+        <span
+          className="font-bold text-sm tracking-tight"
+          style={{ color: '#e8edf5' }}
+        >
+          SecureGarv
+          <span style={{ color: '#7c6af7' }}> / Admin</span>
+        </span>
+      </div>
+
+      <div className="flex-1" />
+
+      {/* Right */}
+      <div className="flex items-center gap-4">
+        {user?.firstName && (
+          <span className="text-xs hidden md:block" style={{ color: '#687081' }}>
+            {user.firstName}
+          </span>
+        )}
+        <div
+          className="h-5 w-px"
+          style={{ background: 'rgba(255,255,255,0.07)' }}
+        />
+        <UserButton
+          appearance={{
+            elements: {
+              avatarBox: 'w-7 h-7',
+            },
+          }}
+        />
       </div>
     </nav>
   );
