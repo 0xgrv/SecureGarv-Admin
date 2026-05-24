@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Plus, Edit, Trash2, Eye, Calendar, Clock, X, Loader2, BookOpen, Bold, Italic, Underline, List, Code, Link, Image, RefreshCw } from 'lucide-react';
+import { Save, Plus, Edit, Trash2, Eye, Calendar, Clock, X, Loader2, BookOpen, Bold, Italic, Underline, List, Code, Link, Image, RefreshCw, FileText, CheckCircle } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
@@ -43,51 +43,43 @@ const getCharacterCount = (text: string) => {
 // AUTOMATIC READ TIME CALCULATION
 const calculateReadTime = (content: string): string => {
   if (!content.trim()) return '0 min read';
-  
-  // Strip HTML tags but preserve structure information
+
   const text = content
-    .replace(/<img[^>]*>/gi, ' [image] ') // Count images as additional time
-    .replace(/<h[1-6][^>]*>/gi, ' [heading] ') // Count headings as structural breaks
-    .replace(/<code[^>]*>|<\/code>/gi, ' [code] ') // Mark code blocks
+    .replace(/<img[^>]*>/gi, ' [image] ')
+    .replace(/<h[1-6][^>]*>/gi, ' [heading] ')
+    .replace(/<code[^>]*>|<\/code>/gi, ' [code] ')
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  
+
   if (!text) return '0 min read';
-  
+
   const wordCount = text.split(/\s+/).length;
-  
-  // Count elements
   const imageCount = (content.match(/<img[^>]*>/gi) || []).length;
   const headingCount = (content.match(/<h[1-6][^>]*>/gi) || []).length;
   const codeBlockCount = (content.match(/<code[^>]*>/gi) || []).length;
-  
-  // Medium-style calculation (more conservative)
-  const wordsPerMinute = 160; // Slower than average
+
+  const wordsPerMinute = 160;
   const baseMinutes = wordCount / wordsPerMinute;
-  
-  // Element time bonuses (Medium approach)
-  const elementTime = 
-    (imageCount * 0.4) +      // 24 seconds per image
-    (headingCount * 0.15) +   // 9 seconds per heading
-    (codeBlockCount * 0.8);   // 48 seconds per code block
-  
+  const elementTime =
+    (imageCount * 0.4) +
+    (headingCount * 0.15) +
+    (codeBlockCount * 0.8);
+
   const totalMinutes = baseMinutes + elementTime;
   const minutes = Math.max(1, Math.ceil(totalMinutes));
-  
-  // For very long articles, show in hours for anything over 60 minutes
+
   if (minutes >= 60) {
     const hours = Math.floor(minutes / 60);
     const remainingMinutes = minutes % 60;
-    return remainingMinutes > 0 
-      ? `${hours}h ${remainingMinutes}m read` 
+    return remainingMinutes > 0
+      ? `${hours}h ${remainingMinutes}m read`
       : `${hours}h read`;
   }
-  
+
   return `${minutes} min read`;
 };
 
-// Debounce utility function (browser compatible)
 function debounce(func: Function, wait: number) {
   let timeout: number;
   return function executedFunction(...args: any[]) {
@@ -100,7 +92,6 @@ function debounce(func: Function, wait: number) {
   };
 }
 
-// Custom toolbar component
 const CustomToolbar = () => (
   <div id="toolbar" className="border-b border-gray-600/50 p-2 bg-gray-700/50">
     <select className="ql-header text-gray-300 bg-gray-700 border border-gray-600 rounded mr-2 p-1">
@@ -109,7 +100,7 @@ const CustomToolbar = () => (
       <option value="3">Heading 3</option>
       <option value="">Normal</option>
     </select>
-    
+
     <button className="ql-bold p-1 mx-1 text-gray-300 hover:bg-gray-600 rounded">
       <Bold size={16} />
     </button>
@@ -119,14 +110,14 @@ const CustomToolbar = () => (
     <button className="ql-underline p-1 mx-1 text-gray-300 hover:bg-gray-600 rounded">
       <Underline size={16} />
     </button>
-    
+
     <button className="ql-list p-1 mx-1 text-gray-300 hover:bg-gray-600 rounded" value="ordered">
       <List size={16} />
     </button>
     <button className="ql-list p-1 mx-1 text-gray-300 hover:bg-gray-600 rounded" value="bullet">
       <List size={16} />
     </button>
-    
+
     <button className="ql-code-block p-1 mx-1 text-gray-300 hover:bg-gray-600 rounded">
       <Code size={16} />
     </button>
@@ -146,6 +137,7 @@ export default function BlogSection() {
   const [showEditor, setShowEditor] = useState(false);
   const [editingPost, setEditingPost] = useState<BlogPost | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<'all' | 'published' | 'draft'>('all');
   const quillRef = useRef<ReactQuill>(null);
 
   const [formData, setFormData] = useState({
@@ -153,33 +145,27 @@ export default function BlogSection() {
     excerpt: '',
     content: '',
     date: new Date().toISOString().split('T')[0],
-    readTime: '1 min read', // Default will be calculated automatically
+    readTime: '1 min read',
     image: '',
     tags: [] as string[],
     status: 'draft' as 'draft' | 'published',
     newTag: ''
   });
 
-  // Counter states
   const [titleCharCount, setTitleCharCount] = useState(0);
   const [excerptCharCount, setExcerptCharCount] = useState(0);
   const [excerptWordCount, setExcerptWordCount] = useState(0);
   const [tagCount, setTagCount] = useState(0);
 
-  // Quill editor modules configuration
   const modules = {
     toolbar: {
       container: "#toolbar",
-      handlers: {
-        // You can add custom handlers here if needed
-      }
     },
     clipboard: {
       matchVisual: false,
     }
   };
 
-  // Quill editor formats
   const formats = [
     'header', 'font', 'size',
     'bold', 'italic', 'underline', 'strike', 'blockquote',
@@ -187,7 +173,6 @@ export default function BlogSection() {
     'link', 'image', 'video', 'code-block'
   ];
 
-  // DEBOUNCED READ TIME CALCULATION
   const calculateReadTimeDebounced = useCallback(
     debounce((content: string) => {
       const readTime = calculateReadTime(content);
@@ -196,14 +181,12 @@ export default function BlogSection() {
     []
   );
 
-  // Manual refresh for read time
   const refreshReadTime = () => {
     const newReadTime = calculateReadTime(formData.content);
     setFormData(prev => ({ ...prev, readTime: newReadTime }));
     toast.success(`Read time updated: ${newReadTime}`);
   };
 
-  // Fixed API client with proper headers
   const apiClient = async <T,>(endpoint: string, options: RequestInit = {}): Promise<T> => {
     const headers = new Headers({
       'Content-Type': 'application/json',
@@ -212,13 +195,13 @@ export default function BlogSection() {
     });
 
     try {
-      const response = await fetch(`${API_URL}${endpoint}`, { 
-        ...options, 
-        headers 
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        ...options,
+        headers
       });
 
       const data = await response.json();
-      
+
       if (!response.ok) {
         throw {
           message: data.message || `Request failed with status ${response.status}`,
@@ -252,10 +235,9 @@ export default function BlogSection() {
     fetchPosts();
   }, []);
 
-  // Validate form fields
   const validateField = (field: string, value: string): boolean => {
     const errors = { ...validationErrors };
-    
+
     if (!value.trim() && field !== 'newTag') {
       errors[field] = 'This field is required';
     } else {
@@ -267,36 +249,32 @@ export default function BlogSection() {
   };
 
   const handleInputChange = (field: string, value: string | string[]) => {
-    setFormData(prev => ({ 
-      ...prev, 
-      [field]: field === 'status' ? (value as 'draft' | 'published') : value 
+    setFormData(prev => ({
+      ...prev,
+      [field]: field === 'status' ? (value as 'draft' | 'published') : value
     }));
-    
-    // Update counters
+
     if (field === 'title') {
       setTitleCharCount(getCharacterCount(value as string));
     }
-    
+
     if (field === 'excerpt') {
       setExcerptCharCount(getCharacterCount(value as string));
       setExcerptWordCount(getWordCount(value as string));
     }
-    
+
     if (field === 'tags') {
       setTagCount((value as string[]).length);
     }
-    
+
     if (field !== 'status' && field !== 'tags') {
       validateField(field, value as string);
     }
   };
 
-  // UPDATED CONTENT CHANGE HANDLER WITH AUTO READ TIME
   const handleContentChange = (content: string) => {
     setFormData(prev => ({ ...prev, content }));
     validateField('content', content);
-    
-    // Automatically calculate and update read time
     calculateReadTimeDebounced(content);
   };
 
@@ -344,7 +322,7 @@ export default function BlogSection() {
         excerpt: '',
         content: '',
         date: new Date().toISOString().split('T')[0],
-        readTime: '1 min read', // Updated default
+        readTime: '1 min read',
         image: '',
         tags: [],
         status: 'draft',
@@ -368,7 +346,7 @@ export default function BlogSection() {
   const savePost = async () => {
     const requiredFields = ['title', 'excerpt', 'content', 'image'];
     let isValid = true;
-    
+
     requiredFields.forEach(field => {
       if (!validateField(field, formData[field as keyof typeof formData] as string)) {
         isValid = false;
@@ -383,24 +361,20 @@ export default function BlogSection() {
     setIsSaving(true);
     try {
       if (editingPost) {
-        // Update existing post
         await apiClient(`/api/blog/${editingPost._id}`, {
           method: 'PUT',
           body: JSON.stringify(formData)
         });
         toast.success('Blog post updated successfully!');
       } else {
-        // Create new post
         await apiClient('/api/blog', {
           method: 'POST',
           body: JSON.stringify(formData)
         });
         toast.success('Blog post created successfully!');
       }
-      
-      // Refresh posts list
-      const response = await apiClient<BlogApiResponse>('/api/blog?status=draft');
 
+      const response = await apiClient<BlogApiResponse>('/api/blog');
       setPosts(response.posts);
       closeEditor();
     } catch (error) {
@@ -437,10 +411,10 @@ export default function BlogSection() {
         method: 'PUT',
         body: JSON.stringify(updatedPost)
       });
-      
-      setPosts(posts.map(p => 
-        p._id === post._id 
-          ? { ...updatedPost, status: updatedPost.status as 'draft' | 'published' } 
+
+      setPosts(posts.map(p =>
+        p._id === post._id
+          ? { ...updatedPost, status: updatedPost.status as 'draft' | 'published' }
           : p
       ));
       toast.success(`Post ${updatedPost.status === 'published' ? 'published' : 'unpublished'} successfully!`);
@@ -450,6 +424,15 @@ export default function BlogSection() {
       toast.error(err.message || 'Failed to update post status');
     }
   };
+
+  const getFilteredPosts = () => {
+    if (activeTab === 'all') return posts;
+    return posts.filter(post => post.status === activeTab);
+  };
+
+  const filteredPosts = getFilteredPosts();
+  const publishedCount = posts.filter(p => p.status === 'published').length;
+  const draftCount = posts.filter(p => p.status === 'draft').length;
 
   if (isLoading) {
     return (
@@ -472,8 +455,8 @@ export default function BlogSection() {
           borderRadius: '0.5rem',
           padding: '0.75rem 1rem'
         }
-      }}/>
-      
+      }} />
+
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
@@ -492,9 +475,43 @@ export default function BlogSection() {
           </button>
         </div>
 
+        {/* Tabs */}
+        <div className="flex gap-2 mb-6 border-b border-gray-700/50 pb-4">
+          <button
+            onClick={() => setActiveTab('all')}
+            className={`px-4 py-2 rounded-lg transition flex items-center gap-2 ${activeTab === 'all'
+                ? 'bg-purple-600/30 text-purple-400 border border-purple-500/30'
+                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50'
+              }`}
+          >
+            <FileText size={16} />
+            All Posts ({posts.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('published')}
+            className={`px-4 py-2 rounded-lg transition flex items-center gap-2 ${activeTab === 'published'
+                ? 'bg-green-600/30 text-green-400 border border-green-500/30'
+                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50'
+              }`}
+          >
+            <CheckCircle size={16} />
+            Published ({publishedCount})
+          </button>
+          <button
+            onClick={() => setActiveTab('draft')}
+            className={`px-4 py-2 rounded-lg transition flex items-center gap-2 ${activeTab === 'draft'
+                ? 'bg-yellow-600/30 text-yellow-400 border border-yellow-500/30'
+                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50'
+              }`}
+          >
+            <Edit size={16} />
+            Drafts ({draftCount})
+          </button>
+        </div>
+
         {/* Posts Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {posts.map((post) => (
+          {filteredPosts.map((post) => (
             <div key={post._id} className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg hover:border-gray-600/70 transition hover:shadow-xl hover:shadow-purple-500/10">
               {/* Image */}
               <div className="relative h-48 mb-4 rounded-lg overflow-hidden group">
@@ -507,11 +524,10 @@ export default function BlogSection() {
                   }}
                 />
                 <div className="absolute top-3 right-3">
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                    post.status === 'published' 
-                      ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${post.status === 'published'
+                      ? 'bg-green-500/20 text-green-400 border border-green-500/30'
                       : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-                  }`}>
+                    }`}>
                     {post.status}
                   </span>
                 </div>
@@ -522,7 +538,7 @@ export default function BlogSection() {
                 <h3 className="text-xl font-semibold text-white line-clamp-2 leading-tight">
                   {post.title}
                 </h3>
-                
+
                 <p className="text-gray-400 text-sm line-clamp-3 leading-relaxed">
                   {post.excerpt}
                 </p>
@@ -586,21 +602,29 @@ export default function BlogSection() {
             </div>
           ))}
 
-          {posts.length === 0 && (
+          {filteredPosts.length === 0 && (
             <div className="col-span-full text-center py-16">
               <div className="bg-gray-800/50 rounded-xl p-12 border-2 border-dashed border-gray-700/50">
                 <BookOpen className="w-16 h-16 text-gray-500 mx-auto mb-6" />
-                <h3 className="text-xl font-medium text-gray-300 mb-3">No blog posts yet</h3>
+                <h3 className="text-xl font-medium text-gray-300 mb-3">
+                  {activeTab === 'all' && 'No blog posts yet'}
+                  {activeTab === 'published' && 'No published posts'}
+                  {activeTab === 'draft' && 'No draft posts'}
+                </h3>
                 <p className="text-gray-500 mb-6 max-w-md mx-auto">
-                  Start creating amazing content for your audience. Your first blog post is just a click away.
+                  {activeTab === 'all' && 'Start creating amazing content for your audience. Your first blog post is just a click away.'}
+                  {activeTab === 'published' && 'Publish your drafts to see them here.'}
+                  {activeTab === 'draft' && 'Create a draft post to start writing.'}
                 </p>
-                <button
-                  onClick={() => openEditor()}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-lg transition shadow-lg hover:shadow-purple-500/25 mx-auto"
-                >
-                  <Plus size={20} />
-                  Create First Post
-                </button>
+                {(activeTab === 'all' || activeTab === 'draft') && (
+                  <button
+                    onClick={() => openEditor()}
+                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-lg transition shadow-lg hover:shadow-purple-500/25 mx-auto"
+                  >
+                    <Plus size={20} />
+                    Create First Post
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -636,9 +660,8 @@ export default function BlogSection() {
                   value={formData.title}
                   onChange={(e) => handleInputChange('title', e.target.value)}
                   onBlur={(e) => validateField('title', e.target.value)}
-                  className={`w-full p-3 bg-gray-700/70 border ${
-                    validationErrors.title ? 'border-red-500/80' : 'border-gray-600/50'
-                  } rounded-lg focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition text-white placeholder-gray-400`}
+                  className={`w-full p-3 bg-gray-700/70 border ${validationErrors.title ? 'border-red-500/80' : 'border-gray-600/50'
+                    } rounded-lg focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition text-white placeholder-gray-400`}
                   placeholder="Enter blog post title"
                   maxLength={200}
                 />
@@ -662,9 +685,8 @@ export default function BlogSection() {
                   onChange={(e) => handleInputChange('excerpt', e.target.value)}
                   onBlur={(e) => validateField('excerpt', e.target.value)}
                   rows={3}
-                  className={`w-full p-3 bg-gray-700/70 border ${
-                    validationErrors.excerpt ? 'border-red-500/80' : 'border-gray-600/50'
-                  } rounded-lg focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition text-white placeholder-gray-400`}
+                  className={`w-full p-3 bg-gray-700/70 border ${validationErrors.excerpt ? 'border-red-500/80' : 'border-gray-600/50'
+                    } rounded-lg focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition text-white placeholder-gray-400`}
                   placeholder="Brief description of your blog post"
                   maxLength={300}
                 />
@@ -688,9 +710,8 @@ export default function BlogSection() {
                   value={formData.image}
                   onChange={(e) => handleInputChange('image', e.target.value)}
                   onBlur={(e) => validateField('image', e.target.value)}
-                  className={`w-full p-3 bg-gray-700/70 border ${
-                    validationErrors.image ? 'border-red-500/80' : 'border-gray-600/50'
-                  } rounded-lg focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition text-white placeholder-gray-400`}
+                  className={`w-full p-3 bg-gray-700/70 border ${validationErrors.image ? 'border-red-500/80' : 'border-gray-600/50'
+                    } rounded-lg focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition text-white placeholder-gray-400`}
                   placeholder="https://example.com/image.jpg"
                 />
                 {validationErrors.image && (
@@ -703,9 +724,8 @@ export default function BlogSection() {
                 <label className="block text-sm font-medium text-gray-300 mb-2">
                   Content *
                 </label>
-                <div className={`border ${
-                  validationErrors.content ? 'border-red-500/80' : 'border-gray-600/50'
-                } rounded-lg overflow-hidden`}>
+                <div className={`border ${validationErrors.content ? 'border-red-500/80' : 'border-gray-600/50'
+                  } rounded-lg overflow-hidden`}>
                   <CustomToolbar />
                   <ReactQuill
                     ref={quillRef}
@@ -715,7 +735,7 @@ export default function BlogSection() {
                     formats={formats}
                     theme="snow"
                     className="bg-gray-700/70 text-white"
-                    style={{ 
+                    style={{
                       height: '400px',
                       border: 'none'
                     }}
@@ -740,7 +760,6 @@ export default function BlogSection() {
                   />
                 </div>
 
-                {/* UPDATED READ TIME FIELD WITH REFRESH BUTTON */}
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">
                     Read Time (auto-calculated)
@@ -840,11 +859,10 @@ export default function BlogSection() {
               <button
                 onClick={savePost}
                 disabled={isSaving}
-                className={`px-6 py-2 rounded-lg transition flex items-center gap-2 ${
-                  isSaving 
-                    ? 'bg-purple-600/70 text-purple-200 cursor-not-allowed' 
+                className={`px-6 py-2 rounded-lg transition flex items-center gap-2 ${isSaving
+                    ? 'bg-purple-600/70 text-purple-200 cursor-not-allowed'
                     : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-lg hover:shadow-purple-500/25'
-                }`}
+                  }`}
               >
                 {isSaving ? (
                   <Loader2 className="animate-spin h-4 w-4" />
